@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+export const dynamic = 'force-dynamic'; 
+export const revalidate = 0;
 
 // 1. УЖЕСТОЧЕННЫЙ ПРОМПТ
 const SYSTEM_PROMPT = `
@@ -18,7 +20,7 @@ async function getMarketData() {
   try {
     const res = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=near,bitcoin&vs_currencies=usd", 
-      { next: { revalidate: 60 }, signal: AbortSignal.timeout(3000) }
+      { cache: "no-store", signal: AbortSignal.timeout(3000) }
     );
     if (res.ok) {
       const data = await res.json();
@@ -33,7 +35,7 @@ async function getMarketData() {
   try {
     const res = await fetch(
       "https://api.coincap.io/v2/assets?ids=near-protocol,bitcoin", 
-      { next: { revalidate: 60 }, signal: AbortSignal.timeout(3000) }
+      { cache: "no-store", signal: AbortSignal.timeout(3000) }
     );
     if (res.ok) {
       const json = await res.json();
