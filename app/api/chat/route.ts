@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 
-// --- CONFIG ---
 const SYSTEM_PROMPT = `
 You are SafePilot.sys, a tactical DeFi interface for NEAR Protocol.
 STYLE: Cyberpunk terminal, brief, robotic, military jargon.
@@ -11,7 +10,7 @@ INSTRUCTIONS:
 `;
 
 export async function POST(req: Request) {
-  // --- 1. ПРЕДВАРИТЕЛЬНОЕ ОБЪЯВЛЕНИЕ (Scope Fix) ---
+  // Объявление переменных в начале для доступа из всех блоков
   let detectedIntent = "GREETING";
   let nearAmount = "0.00"; 
   let rawBalance = "0";
@@ -24,11 +23,11 @@ export async function POST(req: Request) {
     const { message, accountId } = body;
     const msgLower = message ? message.toLowerCase() : "";
 
-    // Определение интента
+    // 1. INTENT
     if (msgLower.match(/stake|earn|yield|market|pool|invest|deploy|scan|find/)) detectedIntent = "STAKE";
     if (msgLower.match(/vault|cabinet|portfolio|asset|funds|balance|withdraw/)) detectedIntent = "CABINET";
 
-    // --- 2. MARKET DATA ---
+    // 2. MARKET DATA
     try {
       const [nearRes, btcRes] = await Promise.all([
         fetch("https://api.binance.com/api/v3/ticker/price?symbol=NEARUSDT"),
@@ -38,7 +37,7 @@ export async function POST(req: Request) {
       prices = { near: parseFloat(n.price), btc: parseFloat(b.price) };
     } catch (e) { console.warn("Market Data Offline"); }
 
-    // --- 3. RPC HELPER ---
+    // 3. RPC HELPER
     const rpcCall = async (contract: string, method: string, args: any) => {
         try {
             const res = await fetch("https://rpc.mainnet.near.org", {
@@ -54,7 +53,7 @@ export async function POST(req: Request) {
         } catch (e) { return null; }
     };
 
-    // --- 4. PORTFOLIO CHECK ---
+    // 4. PORTFOLIO CHECK (HIGH PRECISION)
     if (accountId) {
       try {
         const accRes = await fetch("https://rpc.mainnet.near.org", {
@@ -66,31 +65,28 @@ export async function POST(req: Request) {
             rawBalance = accJson.result.amount;
             nearAmount = (Number(rawBalance.slice(0, -18)) / 1000000).toFixed(2);
         }
+
+        const linBal = await rpcCall("linear-protocol.near", "ft_balance_of", { account_id: accountId });
+        if (linBal && parseFloat(linBal) > 1000000) {
+            const amt = (Number(linBal.slice(0, -18)) / 1000000).toFixed(6);
+            portfolio.push({ name: "LiNEAR", amount: amt, token: "LiNEAR", nearValue: (parseFloat(amt) * 1.15).toFixed(2), contract: "linear-protocol.near" });
+        }
+
+        const metaBal = await rpcCall("meta-pool.near", "ft_balance_of", { account_id: accountId });
+        if (metaBal && parseFloat(metaBal) > 1000000) {
+            const amt = (Number(metaBal.slice(0, -18)) / 1000000).toFixed(6);
+            portfolio.push({ name: "MetaPool", amount: amt, token: "stNEAR", nearValue: (parseFloat(amt) * 1.18).toFixed(2), contract: "meta-pool.near" });
+        }
+
+        const staderBal = await rpcCall("v2-nearx.stader-labs.near", "ft_balance_of", { account_id: accountId });
+        if (staderBal && parseFloat(staderBal) > 1000000) {
+            const amt = (Number(staderBal.slice(0, -18)) / 1000000).toFixed(6);
+            portfolio.push({ name: "Stader", amount: amt, token: "NearX", nearValue: (parseFloat(amt) * 1.16).toFixed(2), contract: "v2-nearx.stader-labs.near" });
+        }
       } catch(e) {}
-
-      // Check LiNEAR
-      const linBal = await rpcCall("linear-protocol.near", "ft_balance_of", { account_id: accountId });
-      if (linBal && parseFloat(linBal) > 1000000) {
-          const amt = (Number(linBal.slice(0, -18)) / 1000000).toFixed(6);
-          portfolio.push({ name: "LiNEAR", amount: amt, token: "LiNEAR", nearValue: (parseFloat(amt) * 1.15).toFixed(2), contract: "linear-protocol.near" });
-      }
-
-      // Check Meta Pool
-      const metaBal = await rpcCall("meta-pool.near", "ft_balance_of", { account_id: accountId });
-      if (metaBal && parseFloat(metaBal) > 1000000) {
-          const amt = (Number(metaBal.slice(0, -18)) / 1000000).toFixed(6);
-          portfolio.push({ name: "MetaPool", amount: amt, token: "stNEAR", nearValue: (parseFloat(amt) * 1.18).toFixed(2), contract: "meta-pool.near" });
-      }
-
-      // Check Stader
-      const staderBal = await rpcCall("v2-nearx.stader-labs.near", "ft_balance_of", { account_id: accountId });
-      if (staderBal && parseFloat(staderBal) > 1000000) {
-          const amt = (Number(staderBal.slice(0, -18)) / 1000000).toFixed(6);
-          portfolio.push({ name: "Stader", amount: amt, token: "NearX", nearValue: (parseFloat(amt) * 1.16).toFixed(2), contract: "v2-nearx.stader-labs.near" });
-      }
     }
 
-    // --- 5. DEFI SCANNER ---
+    // 5. DEFI SCANNER
     let linearAPY = "9.85%";
     try {
         const linData = await rpcCall("linear-protocol.near", "get_summary", {});
@@ -115,7 +111,7 @@ export async function POST(req: Request) {
         contract: "v2-nearx.stader-labs.near", method: "deposit_and_stake", isVerified: true
     });
 
-     try {
+    try {
         const refRes = await fetch("https://api.ref.finance/list-top-pools");
         if (refRes.ok) {
             const allPools = await refRes.json();
@@ -138,16 +134,17 @@ export async function POST(req: Request) {
         }
     } catch(e) { console.warn("Ref Scan Fail"); }
 
-    // --- 6. RESPONSE ---
+    // 6. RESPONSE
     if (message === "INITIALIZE_GREETING") {
        const marketTicker = `BTC $${Math.round(prices.btc).toLocaleString()} | NEAR $${prices.near.toFixed(2)}`;
        return NextResponse.json({
-         text: `SYSTEMS ONLINE. PILOT: ${accountId || "GUEST"}\n${marketTicker}\nLIQUID FUNDS: ${nearAmount} NEAR.\n\nSCAN COMPLETE: ${options.length} NODES DETECTED.`,
-         intent: "GREETING", options, portfolio, rawBalance
+         text: `SYSTEMS ONLINE. PILOT: ${accountId || "GUEST"}\n${marketTicker}\nLIQUID FUNDS: ${nearAmount} NEAR.\n\nSCAN COMPLETE: ${options.length} HIGH-YIELD NODES DETECTED.`,
+         intent: "GREETING",
+         options, portfolio, rawBalance
        });
     }
 
-    // --- AI CALL ---
+    // AI CALL
     try {
         const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
@@ -165,7 +162,7 @@ export async function POST(req: Request) {
 
         const aiData = await groqRes.json();
         
-        
+        // Безопасная проверка существования ответа
         if (aiData?.choices?.[0]?.message?.content) {
             const aiResponse = JSON.parse(aiData.choices[0].message.content);
             return NextResponse.json({ 
@@ -173,11 +170,11 @@ export async function POST(req: Request) {
               options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance 
             });
         } else {
-            throw new Error("Invalid AI response structure");
+            throw new Error("AI response error");
         }
 
     } catch (aiError) {
-        // Fallback: 
+        // Fallback если AI не ответил
         return NextResponse.json({ 
           text: `COMMAND ACKNOWLEDGED: ${detectedIntent === "STAKE" ? "SCANNING DEFI NODES..." : "ACCESSING CABINET..."}`,
           intent: detectedIntent,
@@ -188,9 +185,9 @@ export async function POST(req: Request) {
   } catch (error: any) {
     console.error("CRITICAL ERROR:", error);
     return NextResponse.json({ 
-      text: "SYSTEM ERROR: SCANNER FAILED.", 
-      intent: "GREETING",
-      options: [], portfolio: [], rawBalance: "0" 
+        text: "SYSTEM ERROR: SCANNER FAILED.", 
+        intent: "GREETING",
+        options: [], portfolio: [], rawBalance: "0"
     });
   }
 }
