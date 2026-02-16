@@ -1,17 +1,20 @@
 import { NextResponse } from "next/server";
 
+// 1. УЖЕСТОЧЕННЫЙ ПРОМПТ (Защита от галлюцинаций 36%)
 const SYSTEM_PROMPT = `
 You are SafePilot.sys, a tactical DeFi interface for NEAR Protocol.
 STYLE: Cyberpunk terminal, brief, robotic, military jargon.
-INSTRUCTIONS:
-1. If user asks about "balance", "wallet", "funds" -> "intent": "CABINET".
-2. If user asks to "scan", "stake", "invest", "markets" -> "intent": "STAKE".
-3. OUTPUT: JSON ONLY. Structure: { "text": "...", "intent": "..." }
+
+CRITICAL RULES:
+1. DATA INTEGRITY: Use ONLY the provided Pool Data for APY. NEVER invent percentages.
+2. REALITY CHECK: Valid NEAR yield is between 8% and 12%. If you think it is 36%, YOU ARE WRONG. Correct it to ~10%.
+3. SCOPE: We ONLY stake NEAR. BTC is for price reference only (Index). NO BTC staking.
+4. If user asks "scan" or "markets" -> output "intent": "STAKE".
+5. OUTPUT JSON ONLY: { "text": "...", "intent": "..." }
 `;
 
-// Функция для получения цен из нескольких источников (Waterfall)
+// Функция получения цен (как делали ранее)
 async function getMarketData() {
-  // 1. Попытка через CoinGecko (самый стабильный для Vercel)
   try {
     const res = await fetch(
       "https://api.coingecko.com/api/v3/simple/price?ids=near,bitcoin&vs_currencies=usd", 
@@ -27,7 +30,6 @@ async function getMarketData() {
     console.warn("CoinGecko failed, switching to backup...");
   }
 
-  // 2. Попытка через CoinCap (резервный, не требует API ключа)
   try {
     const res = await fetch(
       "https://api.coincap.io/v2/assets?ids=near-protocol,bitcoin", 
@@ -37,20 +39,12 @@ async function getMarketData() {
       const json = await res.json();
       const nearData = json.data.find((d: any) => d.id === "near-protocol");
       const btcData = json.data.find((d: any) => d.id === "bitcoin");
-      
       if (nearData && btcData) {
-        return { 
-          near: parseFloat(nearData.priceUsd), 
-          btc: parseFloat(btcData.priceUsd) 
-        };
+        return { near: parseFloat(nearData.priceUsd), btc: parseFloat(btcData.priceUsd) };
       }
     }
-  } catch (e) {
-    console.warn("CoinCap failed, switching to fallback...");
-  }
+  } catch (e) { console.warn("CoinCap failed"); }
 
-  // 3. Fallback (Хардкод на случай ядерной войны)
-  // Лучше обновить эти значения до актуальных на момент деплоя
   return { near: 3.25, btc: 96400 };
 }
 
@@ -67,11 +61,9 @@ export async function POST(req: Request) {
     const { message, accountId } = body;
     const msgLower = message ? message.toLowerCase() : "";
 
-    // Определение намерения
     if (msgLower.match(/stake|earn|yield|market|pool|invest|deploy|scan|find/)) detectedIntent = "STAKE";
     if (msgLower.match(/vault|cabinet|portfolio|asset|funds|balance|withdraw/)) detectedIntent = "CABINET";
 
-    // 2. ПОЛУЧЕНИЕ КУРСОВ (ИСПРАВЛЕНО)
     prices = await getMarketData();
 
     // RPC helper
@@ -111,19 +103,26 @@ export async function POST(req: Request) {
 
         for (const p of protocols) {
             const bal = await rpcCall(p.id, "ft_balance_of", { account_id: accountId });
-            if (bal && parseFloat(bal) > 1000000) {
-                const amt = (Number(bal.slice(0, -18)) / 1000000).toFixed(6);
-                portfolio.push({ name: p.name, amount: amt, token: p.name, nearValue: (parseFloat(amt) * p.rate).toFixed(2), contract: p.id });
+            if (bal && bal !== "0") {
+                const amt = (Number(bal.slice(0, -18)) / 1000000).toFixed(4);
+                portfolio.push({ 
+                    name: p.name, 
+                    amount: amt, 
+                    rawBalance: bal, 
+                    token: p.name, 
+                    nearValue: (parseFloat(amt) * p.rate).toFixed(2), 
+                    contract: p.id 
+                });
             }
         }
       } catch(e) { console.error("Portfolio check failed"); }
     }
 
-    // 4. ПУЛЫ СТЕЙКИНГА
+    // 4. ПУЛЫ СТЕЙКИНГА (Твердые данные)
     options = [
         { id: "linear-stake", name: "LiNEAR", subName: "Liquid Staking", apy: "9.85%", min: 0.1, risk: "LOW", desc: "PROTOCOL: Top-tier liquid staking. Auto-compounding.", contract: "linear-protocol.near", method: "deposit_and_stake", isVerified: true },
         { id: "meta-stake", name: "META POOL", subName: "Liquid Staking", apy: "10.12%", min: 1.0, risk: "LOW", desc: "GOVERNANCE: Receive stNEAR. DAO voting rights.", contract: "meta-pool.near", method: "deposit_and_stake", isVerified: true },
-        { id: "stader-stake", name: "STADER", subName: "NearX Yield", apy: "9.6%", min: 1.0, risk: "LOW", desc: "STRATEGY: Multi-validator architecture.", contract: "v2-nearx.stader-labs.near", method: "deposit_and_stake", isVerified: true }
+        { id: "stader-stake", name: "STADER", subName: "NearX Yield", apy: "9.60%", min: 1.0, risk: "LOW", desc: "STRATEGY: Multi-validator architecture.", contract: "v2-nearx.stader-labs.near", method: "deposit_and_stake", isVerified: true }
     ];
 
     try {
@@ -142,18 +141,19 @@ export async function POST(req: Request) {
         }
     } catch(e) { console.warn("Ref Finance API Slow or Offline"); }
 
-    // 5. ОБРАБОТКА ПРИВЕТСТВИЯ
     if (message === "INITIALIZE_GREETING") {
-       // Форматируем цены красиво
        const btcDisplay = Math.round(prices.btc).toLocaleString("en-US");
        const nearDisplay = prices.near.toFixed(2);
-       
        const marketTicker = `MARKET: BTC $${btcDisplay} | NEAR $${nearDisplay}.`;
        return NextResponse.json({
          text: `SYSTEMS ONLINE. PILOT: ${accountId || "GUEST"}\n${marketTicker}\nLIQUID FUNDS: ${nearAmount} NEAR.\n\nAWAITING COMMAND.`,
          intent: "GREETING", options, portfolio, rawBalance
        });
     }
+
+    // 5. ПОДГОТОВКА КОНТЕКСТА ДЛЯ AI (Чтобы он не врал про цифры)
+    // Собираем строку вида: "LiNEAR: 9.85%, META POOL: 10.12%, STADER: 9.60%"
+    const availablePoolsStr = options.map(o => `${o.name}: ${o.apy}`).join(", ");
 
     // 6. AI ВЫЗОВ
     try {
@@ -166,10 +166,19 @@ export async function POST(req: Request) {
             model: "llama-3.1-8b-instant",
             messages: [
               { role: "system", content: SYSTEM_PROMPT }, 
-              { role: "user", content: `Context: Wallet ${nearAmount} NEAR. Market: BTC ${prices.btc}, NEAR ${prices.near}. User Input: ${message}` }
+              { 
+                role: "user", 
+                // ВАЖНО: Мы жестко скармливаем ему Pool Data, чтобы он не выдумывал 36%
+                content: `
+                  Wallet: ${nearAmount} NEAR. 
+                  Market Prices: BTC $${prices.btc}, NEAR $${prices.near}.
+                  REAL POOL DATA (Use ONLY these): [ ${availablePoolsStr} ].
+                  User Command: "${message}"
+                ` 
+              }
             ],
             response_format: { type: "json_object" },
-            temperature: 0.2
+            temperature: 0.1 // Снижаем температуру для точности
           }),
         });
 
@@ -186,8 +195,9 @@ export async function POST(req: Request) {
         }
 
     } catch (aiError) {
+        // Fallback текст, если AI сломался, чтобы не показывать бред
         return NextResponse.json({ 
-          text: `COMMAND ACKNOWLEDGED: ${detectedIntent === "STAKE" ? "SCANNING DEFI NODES..." : "ACCESSING CABINET..."}`,
+          text: `COMMAND ACKNOWLEDGED. SCANNING NETWORK...\n\nDETECTED YIELD SOURCES:\n${options.map(o => `> ${o.name}: ${o.apy}`).join("\n")}`,
           intent: detectedIntent,
           options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance 
         });
