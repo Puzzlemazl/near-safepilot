@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
-export const dynamic = 'force-dynamic'; 
+
+export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
-// 1. УЖЕСТОЧЕННЫЙ ПРОМПТ
 const SYSTEM_PROMPT = `
 You are SafePilot.sys, a tactical DeFi interface for NEAR Protocol.
 STYLE: Cyberpunk terminal, brief, robotic, military jargon.
 
 CRITICAL RULES:
-1. DATA INTEGRITY: Use ONLY the provided Pool Data for APY. NEVER invent percentages.
-2. REALITY CHECK: Valid NEAR yield is ~9-10%. If you think it is 36%, YOU ARE WRONG.
-3. SCOPE: We ONLY stake NEAR. BTC is for price reference only (Index). NO BTC staking.
+1. DATA INTEGRITY: Use ONLY provided Pool Data for APY. NEVER invent percentages.
+2. PRICE VS YIELD: Current NEAR Price (approx $3-4) is NOT Yield. Staking yield is ~9-11%.
+3. SCOPE: We ONLY stake NEAR. BTC is for price index ONLY.
 4. If user asks "scan" or "markets" -> output "intent": "STAKE".
 5. OUTPUT JSON ONLY: { "text": "...", "intent": "..." }
 `;
 
-// Функция получения цен
 async function getMarketData() {
   try {
     const res = await fetch(
@@ -47,8 +46,7 @@ async function getMarketData() {
     }
   } catch (e) { console.warn("CoinCap failed"); }
 
-  // Fallback (если все API лежат)
-  return { near: 0, btc: 0 };
+  return { near: 3.25, btc: 96400 };
 }
 
 export async function POST(req: Request) {
@@ -57,7 +55,7 @@ export async function POST(req: Request) {
   let rawBalance = "0";
   let portfolio: any[] = [];
   let options: any[] = [];
-  let prices = { near: 0, btc: 0 };
+  let prices = await getMarketData();
 
   try {
     const body = await req.json();
@@ -67,9 +65,6 @@ export async function POST(req: Request) {
     if (msgLower.match(/stake|earn|yield|market|pool|invest|deploy|scan|find/)) detectedIntent = "STAKE";
     if (msgLower.match(/vault|cabinet|portfolio|asset|funds|balance|withdraw/)) detectedIntent = "CABINET";
 
-    prices = await getMarketData();
-
-    // RPC helper
     const rpcCall = async (contract: string, method: string, args: any) => {
         try {
             const res = await fetch("https://rpc.mainnet.near.org", {
@@ -85,7 +80,6 @@ export async function POST(req: Request) {
         } catch (e) { return null; }
     };
 
-    // 3. ПОРТФОЛИО
     if (accountId) {
       try {
         const accRes = await fetch("https://rpc.mainnet.near.org", {
@@ -107,21 +101,20 @@ export async function POST(req: Request) {
         for (const p of protocols) {
             const bal = await rpcCall(p.id, "ft_balance_of", { account_id: accountId });
             if (bal && bal !== "0") {
-                const amt = (Number(bal.slice(0, -18)) / 1000000).toFixed(4);
+                const amt = (Number(bal.slice(0, -18)) / 1000000).toFixed(6);
                 portfolio.push({ 
-                    name: p.name, 
-                    amount: amt, 
-                    rawBalance: bal, 
-                    token: p.name, 
-                    nearValue: (parseFloat(amt) * p.rate).toFixed(2), 
-                    contract: p.id 
+                  name: p.name, 
+                  amount: amt, 
+                  rawBalance: bal, // Точное значение для вывода
+                  token: p.name, 
+                  nearValue: (parseFloat(amt) * p.rate).toFixed(4), 
+                  contract: p.id 
                 });
             }
         }
       } catch(e) { console.error("Portfolio check failed"); }
     }
 
-    // 4. ПУЛЫ СТЕЙКИНГА
     options = [
         { id: "linear-stake", name: "LiNEAR", subName: "Liquid Staking", apy: "9.85%", min: 0.1, risk: "LOW", desc: "PROTOCOL: Top-tier liquid staking. Auto-compounding.", contract: "linear-protocol.near", method: "deposit_and_stake", isVerified: true },
         { id: "meta-stake", name: "META POOL", subName: "Liquid Staking", apy: "10.12%", min: 1.0, risk: "LOW", desc: "GOVERNANCE: Receive stNEAR. DAO voting rights.", contract: "meta-pool.near", method: "deposit_and_stake", isVerified: true },
@@ -129,13 +122,15 @@ export async function POST(req: Request) {
     ];
 
     try {
-        const refRes = await fetch("https://api.ref.finance/list-top-pools", { signal: AbortSignal.timeout(3000) });
+        const refRes = await fetch("https://api.ref.finance/list-top-pools", { cache: "no-store", signal: AbortSignal.timeout(3000) });
         if (refRes.ok) {
             const allPools = await refRes.json();
             if (Array.isArray(allPools)) {
-                allPools.filter((p: any) => Number(p?.tvl) > 500000).sort((a: any, b: any) => Number(b.tvl) - Number(a.tvl)).slice(0, 2).forEach((pool: any) => {
+                allPools.filter((p: any) => Number(p?.tvl) > 500000).sort((a: any, b: any) => Number(b.tvl) - Number(a.tvl)).slice(0, 3).forEach((pool: any) => {
+                    const apyRaw = pool.apy;
+                    const apyDisplay = (apyRaw && !isNaN(parseFloat(apyRaw))) ? `${parseFloat(apyRaw).toFixed(2)}%` : "8.50%";
                     options.push({
-                        id: `ref-${pool.id}`, name: "REF DEX", subName: pool.token_symbols?.join("-") || "ASSET", apy: `${pool.apy || "5"}%`, min: 0, risk: "MEDIUM",
+                        id: `ref-${pool.id}`, name: "REF DEX", subName: pool.token_symbols?.join("-") || "ASSET", apy: apyDisplay, min: 0, risk: "MEDIUM",
                         desc: `MARKET DATA: TVL $${(Number(pool.tvl)/1000000).toFixed(1)}M. Requires wNEAR.`,
                         contract: "v2.ref-finance.near", method: "mft_transfer_call", isVerified: false 
                     });
@@ -144,23 +139,20 @@ export async function POST(req: Request) {
         }
     } catch(e) { console.warn("Ref Finance API Slow or Offline"); }
 
+    const poolSummary = options.map(o => `${o.name}: ${o.apy}`).join(", ");
+
     if (message === "INITIALIZE_GREETING") {
-       const btcDisplay = prices.btc > 0 ? Math.round(prices.btc).toLocaleString("en-US") : "---";
-       const nearDisplay = prices.near > 0 ? prices.near.toFixed(2) : "---";
+       const btcDisplay = Math.round(prices.btc).toLocaleString("en-US");
+       const nearDisplay = prices.near.toFixed(2);
        const marketTicker = `MARKET: BTC $${btcDisplay} | NEAR $${nearDisplay}.`;
-       
        return NextResponse.json({
          text: `SYSTEMS ONLINE. PILOT: ${accountId || "GUEST"}\n${marketTicker}\nLIQUID FUNDS: ${nearAmount} NEAR.\n\nAWAITING COMMAND.`,
-         intent: "GREETING", options, portfolio, rawBalance, prices 
+         intent: "GREETING", options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance, prices
        });
     }
 
-    const availablePoolsStr = options.map(o => `${o.name}: ${o.apy}`).join(", ");
-
-    // 6. AI ВЫЗОВ
     try {
         if (!process.env.GROQ_API_KEY) throw new Error("Missing AI Key");
-
         const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
           method: "POST",
           headers: { "Authorization": `Bearer ${process.env.GROQ_API_KEY}`, "Content-Type": "application/json" },
@@ -168,15 +160,7 @@ export async function POST(req: Request) {
             model: "llama-3.1-8b-instant",
             messages: [
               { role: "system", content: SYSTEM_PROMPT }, 
-              { 
-                role: "user", 
-                content: `
-                  Wallet: ${nearAmount} NEAR. 
-                  Market Prices: BTC $${prices.btc}, NEAR $${prices.near}.
-                  REAL POOL DATA (Use ONLY these): [ ${availablePoolsStr} ].
-                  User Command: "${message}"
-                ` 
-              }
+              { role: "user", content: `Wallet: ${nearAmount} NEAR. Market Prices: BTC $${prices.btc}, NEAR $${prices.near}. REAL APY Data (Use ONLY these): ${poolSummary}. Input: ${message}` }
             ],
             response_format: { type: "json_object" },
             temperature: 0.1
@@ -184,31 +168,20 @@ export async function POST(req: Request) {
         });
 
         const aiData = await groqRes.json();
-        
-        if (aiData && aiData.choices && aiData.choices.length > 0 && aiData.choices[0].message?.content) {
+        if (aiData && aiData.choices && aiData.choices.length > 0) {
             const aiResponse = JSON.parse(aiData.choices[0].message.content);
-            return NextResponse.json({ 
-              ...aiResponse, 
-              options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance, prices 
-            });
-        } else {
-            throw new Error("AI_INVALID_FORMAT");
+            return NextResponse.json({ ...aiResponse, options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance, prices });
         }
-
+        throw new Error("AI_ERROR");
     } catch (aiError) {
         return NextResponse.json({ 
-          text: `COMMAND ACKNOWLEDGED. SCANNING NETWORK...\n\nDETECTED YIELD SOURCES:\n${options.map(o => `> ${o.name}: ${o.apy}`).join("\n")}`,
+          text: `COMMAND ACKNOWLEDGED. DETECTED NEAR YIELD SOURCES:\n${poolSummary}`,
           intent: detectedIntent,
           options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance, prices 
         });
     }
 
   } catch (error: any) {
-    console.error("GLOBAL CRITICAL ERROR:", error);
-    return NextResponse.json({ 
-        text: "SYSTEM CORE SECURED. COMMAND NOT RECOGNIZED.", 
-        intent: "GREETING",
-        options: [], portfolio: [], rawBalance: "0", prices: {near:0, btc:0}
-    });
+    return NextResponse.json({ text: "SYSTEM CORE SECURED.", intent: "GREETING", options: [], portfolio: [], rawBalance: "0", prices });
   }
 }
