@@ -88,7 +88,11 @@ export default function Home() {
       const res = await fetch("/api/chat", {
         method: "POST",
         body: JSON.stringify({ message: msgToSend, accountId: currentAccount }),
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+            "Content-Type": "application/json",
+            "Cache-Control": "no-cache"
+        },
+        cache: "no-store"
       });
       
       const data = await res.json();
@@ -98,28 +102,21 @@ export default function Home() {
       if (data.rawBalance) setRawBalance(data.rawBalance);
       if (data.intent) setView(data.intent);
 
-      // ИСПРАВЛЕНИЕ: Логика статуса больше не использует хардкодные значения
       if (msgToSend === "INITIALIZE_GREETING" || msgToSend.toLowerCase().includes("status") || msgToSend.toLowerCase().includes("balance")) {
           const currentBalance = parseFloat(data.rawBalance || rawBalance || "0") / 1e24;
           const currentStaked = (data.portfolio || portfolio || []).reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0);
           
-          // 1. Сначала пробуем взять строку маркета из готового текста сервера (Regex)
-          let marketLine = "";
+          // ИСПРАВЛЕНИЕ: Убрана заглушка $3.25. Если данных нет, пишем SYNCING.
+          let marketLine = "MARKET: [SYNCING NETWORK DATA...]";
           const marketMatch = data.text ? data.text.match(/MARKET:.*(?=\n|$)/i) : null;
           
           if (marketMatch) {
              marketLine = marketMatch[0];
-          } 
-          // 2. Если не вышло, строим её из явных цен (если сервер их прислал)
-          else if (data.prices && data.prices.near > 0) {
+          } else if (data.prices && data.prices.near > 0) {
              marketLine = `MARKET: BTC $${Math.round(data.prices.btc).toLocaleString()} | NEAR $${data.prices.near.toFixed(2)}.`;
-          } 
-          // 3. Fallback без цифр, чтобы не врать
-          else {
-             marketLine = "MARKET: SYNCING NETWORK DATA...";
           }
 
-          const formattedText = `SYSTEMS ONLINE. PILOT:\n${shortenAddress(currentAccount)}\n${marketLine}\nLIQUID FUNDS: ${currentBalance.toFixed(2)} NEAR | STAKED: ${currentStaked.toFixed(2)} NEAR.\n\nAWAITING COMMAND.`;
+          const formattedText = `SYSTEMS ONLINE. PILOT:\n${shortenAddress(currentAccount)}\n${marketLine}\nLIQUID FUNDS: ${currentBalance.toFixed(2)} NEAR | STAKED: ${currentStaked.toFixed(4)} NEAR.\n\nAWAITING COMMAND.`;
           
           setFullResponseText(formattedText);
       } else {
@@ -129,7 +126,7 @@ export default function Home() {
       addLog(`INBOUND: ${data.intent || "UNKNOWN"}`);
 
     } catch (err: any) {
-      setFullResponseText(`CRITICAL ERROR: CONNECTION LOST. ${err.message}`);
+      setFullResponseText(`CRITICAL ERROR: CONNECTION LOST.`);
       addLog("ERROR: API UNREACHABLE");
     } finally {
       setIsLoading(false);
@@ -147,7 +144,7 @@ export default function Home() {
       const wallet = await selector.wallet();
       
       const totalYocto = BigInt(rawBalance) * BigInt(percent) / BigInt(100);
-      const GAS_RESERVE = BigInt(5e22); 
+      const GAS_RESERVE = BigInt(5e22); // 0.05 NEAR
       let deposit = totalYocto;
       if (percent === 100 && deposit > GAS_RESERVE) {
           deposit = deposit - GAS_RESERVE;
@@ -216,12 +213,14 @@ export default function Home() {
     try {
       const wallet = await selector.wallet();
 
-      let amountYocto = "0";
+      // ИСПРАВЛЕНИЕ: Используем сырой баланс, чтобы не оставлять пыли
       const rawItem = item as any;
+      let amountYocto = "0";
 
       if (rawItem.rawBalance) {
           amountYocto = rawItem.rawBalance;
       } else {
+          // Fallback для безопасности
           amountYocto = (BigInt(Math.floor(parseFloat(item.amount) * 1e8)) * BigInt(1e16)).toString(); 
       }
 
@@ -240,6 +239,7 @@ export default function Home() {
         }
       } as any];
 
+      // Fix for direct wallet integration
       if (directMNW && wallet.id === "my-near-wallet") {
           await directMNW.signAndSendTransaction({
             receiverId: item.contract,
@@ -280,6 +280,7 @@ export default function Home() {
   // Setup Effects
   useEffect(() => {
     setMounted(true);
+    // Speech Recognition Setup
     if (typeof window !== "undefined") {
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
       if (SpeechRecognition) {
@@ -304,6 +305,7 @@ export default function Home() {
     }
   }, []); 
 
+  // Typing effect
   useEffect(() => {
     if (typingTimerRef.current) clearInterval(typingTimerRef.current);
     if (fullResponseText) {
@@ -325,6 +327,7 @@ export default function Home() {
     return () => { if (typingTimerRef.current) clearInterval(typingTimerRef.current); };
   }, [fullResponseText]);
 
+  // Live Reward Simulation
   const totalStaked = useMemo(() => portfolio?.reduce((sum, item) => sum + parseFloat(item.amount), 0) || 0, [portfolio]);
   useEffect(() => {
     if (totalStaked > 0 && accountId) {
@@ -343,6 +346,7 @@ export default function Home() {
     }
   }, [totalStaked, accountId]);
 
+  // Init Greeting
   useEffect(() => {
     if (accountId && mounted && !fullResponseText && !isLoading && logs.length === 1) {
       const t = setTimeout(() => handleSendMessage("INITIALIZE_GREETING"), 800);
@@ -350,6 +354,7 @@ export default function Home() {
     }
   }, [accountId, mounted]);
 
+  // Tx Toast Cleanup
   useEffect(() => {
     if (txState.status === "SUCCESS" || txState.status === "ERROR") {
       const timer = setTimeout(() => setTxState({ status: "IDLE", msg: "" }), 6000);
@@ -515,13 +520,12 @@ export default function Home() {
                                         <div className="text-right">
                                             <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest text-blue-400 mb-1">Target Amount</div>
                                             <div className="text-xl font-bold text-blue-400">
+                                                {/* ИСПРАВЛЕНИЕ: Визуальная синхронизация с реальным вычетом газа */}
                                                 {(() => {
                                                     const total = parseFloat(rawBalance) / 1e24;
-                                                    let amount = total * (percent / 100);
-                                                    if (percent === 100 && amount > 0.05) {
-                                                        amount -= 0.05;
-                                                    }
-                                                    return amount < 0 ? "0.00" : amount.toFixed(2);
+                                                    let amt = total * (percent / 100);
+                                                    if (percent === 100 && amt > 0.05) amt -= 0.05;
+                                                    return amt < 0 ? "0.00" : amt.toFixed(4);
                                                 })()} N
                                             </div>
                                         </div>

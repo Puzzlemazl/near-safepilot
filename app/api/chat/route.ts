@@ -6,13 +6,10 @@ export const revalidate = 0;
 const SYSTEM_PROMPT = `
 You are SafePilot.sys, a tactical DeFi interface for NEAR Protocol.
 STYLE: Cyberpunk terminal, brief, robotic, military jargon.
-
-CRITICAL RULES:
-1. DATA INTEGRITY: Use ONLY provided Pool Data for APY. NEVER invent percentages.
-2. PRICE VS YIELD: Current NEAR Price (approx $3-4) is NOT Yield. Staking yield is ~9-11%.
-3. SCOPE: We ONLY stake NEAR. BTC is for price index ONLY.
-4. If user asks "scan" or "markets" -> output "intent": "STAKE".
-5. OUTPUT JSON ONLY: { "text": "...", "intent": "..." }
+INSTRUCTIONS:
+1. If user asks about "balance", "wallet", "funds" -> "intent": "CABINET".
+2. If user asks to "scan", "stake", "invest", "markets" -> "intent": "STAKE".
+3. OUTPUT: JSON ONLY. Structure: { "text": "...", "intent": "..." }
 `;
 
 async function getMarketData() {
@@ -44,9 +41,9 @@ async function getMarketData() {
         return { near: parseFloat(nearData.priceUsd), btc: parseFloat(btcData.priceUsd) };
       }
     }
-  } catch (e) { console.warn("CoinCap failed"); }
+  } catch (e) { console.warn("CoinCap failed, using zeroes"); }
 
-  return { near: 3.25, btc: 96400 };
+  return { near: 0, btc: 0 };
 }
 
 export async function POST(req: Request) {
@@ -55,7 +52,7 @@ export async function POST(req: Request) {
   let rawBalance = "0";
   let portfolio: any[] = [];
   let options: any[] = [];
-  let prices = await getMarketData();
+  let prices = { near: 0, btc: 0 };
 
   try {
     const body = await req.json();
@@ -64,6 +61,8 @@ export async function POST(req: Request) {
 
     if (msgLower.match(/stake|earn|yield|market|pool|invest|deploy|scan|find/)) detectedIntent = "STAKE";
     if (msgLower.match(/vault|cabinet|portfolio|asset|funds|balance|withdraw/)) detectedIntent = "CABINET";
+
+    prices = await getMarketData();
 
     const rpcCall = async (contract: string, method: string, args: any) => {
         try {
@@ -103,12 +102,12 @@ export async function POST(req: Request) {
             if (bal && bal !== "0") {
                 const amt = (Number(bal.slice(0, -18)) / 1000000).toFixed(6);
                 portfolio.push({ 
-                  name: p.name, 
-                  amount: amt, 
-                  rawBalance: bal, // Точное значение для вывода
-                  token: p.name, 
-                  nearValue: (parseFloat(amt) * p.rate).toFixed(4), 
-                  contract: p.id 
+                    name: p.name, 
+                    amount: amt, 
+                    rawBalance: bal, 
+                    token: p.name, 
+                    nearValue: (parseFloat(amt) * p.rate).toFixed(4), 
+                    contract: p.id 
                 });
             }
         }
@@ -118,7 +117,7 @@ export async function POST(req: Request) {
     options = [
         { id: "linear-stake", name: "LiNEAR", subName: "Liquid Staking", apy: "9.85%", min: 0.1, risk: "LOW", desc: "PROTOCOL: Top-tier liquid staking. Auto-compounding.", contract: "linear-protocol.near", method: "deposit_and_stake", isVerified: true },
         { id: "meta-stake", name: "META POOL", subName: "Liquid Staking", apy: "10.12%", min: 1.0, risk: "LOW", desc: "GOVERNANCE: Receive stNEAR. DAO voting rights.", contract: "meta-pool.near", method: "deposit_and_stake", isVerified: true },
-        { id: "stader-stake", name: "STADER", subName: "NearX Yield", apy: "9.60%", min: 1.0, risk: "LOW", desc: "STRATEGY: Multi-validator architecture.", contract: "v2-nearx.stader-labs.near", method: "deposit_and_stake", isVerified: true }
+        { id: "stader-stake", name: "STADER", subName: "NearX Yield", apy: "9.6%", min: 1.0, risk: "LOW", desc: "STRATEGY: Multi-validator architecture.", contract: "v2-nearx.stader-labs.near", method: "deposit_and_stake", isVerified: true }
     ];
 
     try {
@@ -127,10 +126,9 @@ export async function POST(req: Request) {
             const allPools = await refRes.json();
             if (Array.isArray(allPools)) {
                 allPools.filter((p: any) => Number(p?.tvl) > 500000).sort((a: any, b: any) => Number(b.tvl) - Number(a.tvl)).slice(0, 3).forEach((pool: any) => {
-                    const apyRaw = pool.apy;
-                    const apyDisplay = (apyRaw && !isNaN(parseFloat(apyRaw))) ? `${parseFloat(apyRaw).toFixed(2)}%` : "8.50%";
+                    const apyVal = (pool.apy && !isNaN(parseFloat(pool.apy))) ? `${parseFloat(pool.apy).toFixed(2)}%` : "8.45%";
                     options.push({
-                        id: `ref-${pool.id}`, name: "REF DEX", subName: pool.token_symbols?.join("-") || "ASSET", apy: apyDisplay, min: 0, risk: "MEDIUM",
+                        id: `ref-${pool.id}`, name: "REF DEX", subName: pool.token_symbols?.join("-") || "ASSET", apy: apyVal, min: 0, risk: "MEDIUM",
                         desc: `MARKET DATA: TVL $${(Number(pool.tvl)/1000000).toFixed(1)}M. Requires wNEAR.`,
                         contract: "v2.ref-finance.near", method: "mft_transfer_call", isVerified: false 
                     });
@@ -139,11 +137,9 @@ export async function POST(req: Request) {
         }
     } catch(e) { console.warn("Ref Finance API Slow or Offline"); }
 
-    const poolSummary = options.map(o => `${o.name}: ${o.apy}`).join(", ");
-
     if (message === "INITIALIZE_GREETING") {
-       const btcDisplay = Math.round(prices.btc).toLocaleString("en-US");
-       const nearDisplay = prices.near.toFixed(2);
+       const btcDisplay = prices.btc > 0 ? Math.round(prices.btc).toLocaleString("en-US") : "---";
+       const nearDisplay = prices.near > 0 ? prices.near.toFixed(2) : "---";
        const marketTicker = `MARKET: BTC $${btcDisplay} | NEAR $${nearDisplay}.`;
        return NextResponse.json({
          text: `SYSTEMS ONLINE. PILOT: ${accountId || "GUEST"}\n${marketTicker}\nLIQUID FUNDS: ${nearAmount} NEAR.\n\nAWAITING COMMAND.`,
@@ -160,7 +156,7 @@ export async function POST(req: Request) {
             model: "llama-3.1-8b-instant",
             messages: [
               { role: "system", content: SYSTEM_PROMPT }, 
-              { role: "user", content: `Wallet: ${nearAmount} NEAR. Market Prices: BTC $${prices.btc}, NEAR $${prices.near}. REAL APY Data (Use ONLY these): ${poolSummary}. Input: ${message}` }
+              { role: "user", content: `Context: Wallet ${nearAmount} NEAR. Market: BTC ${prices.btc}, NEAR ${prices.near}. User Input: ${message}` }
             ],
             response_format: { type: "json_object" },
             temperature: 0.1
@@ -175,13 +171,18 @@ export async function POST(req: Request) {
         throw new Error("AI_ERROR");
     } catch (aiError) {
         return NextResponse.json({ 
-          text: `COMMAND ACKNOWLEDGED. DETECTED NEAR YIELD SOURCES:\n${poolSummary}`,
+          text: `COMMAND ACKNOWLEDGED: ${detectedIntent === "STAKE" ? "SCANNING DEFI NODES..." : "ACCESSING CABINET..."}`,
           intent: detectedIntent,
           options, portfolio: portfolio.length > 0 ? portfolio : null, rawBalance, prices 
         });
     }
 
   } catch (error: any) {
-    return NextResponse.json({ text: "SYSTEM CORE SECURED.", intent: "GREETING", options: [], portfolio: [], rawBalance: "0", prices });
+    console.error("GLOBAL CRITICAL ERROR:", error);
+    return NextResponse.json({ 
+        text: "SYSTEM CORE SECURED. COMMAND NOT RECOGNIZED.", 
+        intent: "GREETING",
+        options: [], portfolio: [], rawBalance: "0", prices: {near:0, btc:0}
+    });
   }
 }
