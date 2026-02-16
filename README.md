@@ -1,36 +1,23 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 🛸 SafePilot: AI-Powered DeFi Copilot for NEAR
 
-## Getting Started
+SafePilot is a high-performance, interactive terminal interface designed to simplify liquid staking and yield optimization on the NEAR Protocol. It combines the power of AI-driven commands with a sleek "cyberpunk" dashboard.
 
-First, run the development server:
+## 🚀 Key Features
+- **AI Command Center:** Execute DeFi strategies using natural language or voice commands.
+- **Smart Staking:** One-click deployment to top NEAR staking pools (MetaPool, LiNEAR, etc.).
+- **Real-time Analytics:** Live yield tracking and system logs for every transaction.
+- **Ping Logistics Integration:** Seamlessly add funds via NEAR Intents.
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+## 🛠 Tech Stack
+- **Frontend:** Next.js 14, Tailwind CSS, Lucide Icons.
+- **Blockchain:** NEAR Protocol, Wallet Selector.
+- **AI:** Custom LLM integration for intent recognition.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## 📦 Installation & Setup
+1. Clone the repo: `git clone https://github.com/Puzzlemazl/near-safepilot.git`
+2. Install dependencies: `npm install`
+3. Set up environment variables in `.env.local`
+4. Run locally: `npm run dev`
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
-
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+*Built for NEAR Hackathon 2026*
