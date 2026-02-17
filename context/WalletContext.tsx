@@ -6,7 +6,7 @@ import type { WalletSelector, AccountState } from "@near-wallet-selector/core";
 import "@near-wallet-selector/modal-ui/styles.css";
 import { setupModal } from "@near-wallet-selector/modal-ui";
 
-// --- Убедись, что setupHereWallet УДАЛЕН из импортов ---
+
 
 interface WalletContextValue {
   selector: WalletSelector | null;
@@ -26,7 +26,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
       const selector = await setupWalletSelector({
         network: "mainnet",
         modules: [
-          // ОСТАВЛЯЕМ ТОЛЬКО MY NEAR WALLET
+          
           setupMyNearWallet(), 
         ],
       });
@@ -57,7 +57,7 @@ export const WalletProvider = ({ children }: { children: React.ReactNode }) => {
   const signIn = () => {
     if (!selector) return;
     const modal = setupModal(selector, {
-      contractId: "meta-pool.near", // или любой другой контракт
+      contractId: "meta-pool.near", 
     });
     modal.show();
   };
