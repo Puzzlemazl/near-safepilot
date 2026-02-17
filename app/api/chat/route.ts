@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-// 1. УЖЕСТОЧЕННЫЙ ПРОМПТ (Защита от галлюцинаций 36%)
+
 const SYSTEM_PROMPT = `
 You are SafePilot.sys, a tactical DeFi interface for NEAR Protocol.
 STYLE: Cyberpunk terminal, brief, robotic, military jargon.
@@ -13,7 +13,7 @@ CRITICAL RULES:
 5. OUTPUT JSON ONLY: { "text": "...", "intent": "..." }
 `;
 
-// Функция получения цен (как делали ранее)
+
 async function getMarketData() {
   try {
     const res = await fetch(
@@ -151,8 +151,7 @@ export async function POST(req: Request) {
        });
     }
 
-    // 5. ПОДГОТОВКА КОНТЕКСТА ДЛЯ AI (Чтобы он не врал про цифры)
-    // Собираем строку вида: "LiNEAR: 9.85%, META POOL: 10.12%, STADER: 9.60%"
+    // 5. ПОДГОТОВКА КОНТЕКСТА ДЛЯ AI 
     const availablePoolsStr = options.map(o => `${o.name}: ${o.apy}`).join(", ");
 
     // 6. AI ВЫЗОВ
@@ -168,7 +167,7 @@ export async function POST(req: Request) {
               { role: "system", content: SYSTEM_PROMPT }, 
               { 
                 role: "user", 
-                // ВАЖНО: Мы жестко скармливаем ему Pool Data, чтобы он не выдумывал 36%
+               
                 content: `
                   Wallet: ${nearAmount} NEAR. 
                   Market Prices: BTC $${prices.btc}, NEAR $${prices.near}.
@@ -178,7 +177,7 @@ export async function POST(req: Request) {
               }
             ],
             response_format: { type: "json_object" },
-            temperature: 0.1 // Снижаем температуру для точности
+            temperature: 0.1 
           }),
         });
 
@@ -195,7 +194,7 @@ export async function POST(req: Request) {
         }
 
     } catch (aiError) {
-        // Fallback текст, если AI сломался, чтобы не показывать бред
+        
         return NextResponse.json({ 
           text: `COMMAND ACKNOWLEDGED. SCANNING NETWORK...\n\nDETECTED YIELD SOURCES:\n${options.map(o => `> ${o.name}: ${o.apy}`).join("\n")}`,
           intent: detectedIntent,
