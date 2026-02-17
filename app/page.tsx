@@ -106,7 +106,7 @@ export default function Home() {
           const currentBalance = parseFloat(data.rawBalance || rawBalance || "0") / 1e24;
           const currentStaked = (data.portfolio || portfolio || []).reduce((sum: number, item: any) => sum + parseFloat(item.amount), 0);
           
-          // ИСПРАВЛЕНИЕ: Убрана заглушка $3.25. Если данных нет, пишем SYNCING.
+          
           let marketLine = "MARKET: [SYNCING NETWORK DATA...]";
           const marketMatch = data.text ? data.text.match(/MARKET:.*(?=\n|$)/i) : null;
           
@@ -213,7 +213,7 @@ export default function Home() {
     try {
       const wallet = await selector.wallet();
 
-      // ИСПРАВЛЕНИЕ: Используем сырой баланс, чтобы не оставлять пыли
+      
       const rawItem = item as any;
       let amountYocto = "0";
 
@@ -239,7 +239,7 @@ export default function Home() {
         }
       } as any];
 
-      // Fix for direct wallet integration
+      
       if (directMNW && wallet.id === "my-near-wallet") {
           await directMNW.signAndSendTransaction({
             receiverId: item.contract,
